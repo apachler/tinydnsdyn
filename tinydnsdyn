@@ -200,12 +200,12 @@ class Dolphin:
             cur.execute("SELECT `Salt` FROM `Profiles` WHERE `NickName` = '" + user + "'")
             row = cur.fetchone()
             salt = str(row[0])
-            print "Salt is " + str(salt)
+            # DEBUG print "Salt is " + str(salt)
 
             # generate password hash and check if it equals users password in DB
             passwordmd5 = hashlib.md5(password).hexdigest()
             passwordsha1 = hashlib.sha1(passwordmd5+salt).hexdigest()
-            print "Password sha is " + passwordsha1
+            # DEBUG print "Password sha is " + passwordsha1
 
             now = datetime.datetime.now()
             f = '%Y-%m-%d %H:%M:%S'
@@ -213,7 +213,7 @@ class Dolphin:
             id = cur.fetchone()
 
             if id is not None:
-                print "ID is " + str(id[0])
+                print "User found with UserID " + str(id[0]) + " in Dolphin database"
                 return True
 
             return False
@@ -229,8 +229,10 @@ def main():
             help="default TTL (default: 60)")
     parser.add_option("-a", "--address", dest="address",
             help="the address to bind to (default: all)")
+    parser.add_option("-s", "--ssl", dest="ssl",
+            help="yes/no to use HTTPS connection (default: yes)")
     parser.add_option("-l", "--listen", dest="port",
-            help="the port to listen on (default: 4443)")
+            help="the port to listen on (default: 80/443 depends on --ssl)")
     parser.add_option("-f", "--passfile", dest="passfile",
             help="the password file (default: /home/tinydns/tinydnsdyn.passwords)")
     parser.add_option("-c", "--certfile", dest="passfile",
@@ -247,17 +249,23 @@ def main():
             help="Dolphin user level needed (default: 7)")
 
     # defaults
-    parser.set_defaults(root='/var/cache/tinydns', address='',
-            datafile='/etc/tinydns/ddns.socialhams.net', port=4443, ttl=60,
+    parser.set_defaults(root='/var/cache/tinydns', address='', ssl='yes',
+            datafile='/etc/tinydns/ddns.socialhams.net', port=80, ttl=60,
             passfile='/home/tinydns/tinydnsdyn.passwords',
             certfile='/home/tinydns/tinydnsdyn.cert',
             mysql_host='localhost', dolphin_level=7)
     global options
     (options, args) = parser.parse_args()
 
-    httpd = BaseHTTPServer.HTTPServer((options.address, options.port), RequestHandler)
-    httpd.socket = ssl.wrap_socket (httpd.socket, certfile=options.certfile, server_side=True)
-    httpd.serve_forever()
+    if options.ssl == 'yes':
+            if options.port == 80:
+                    options.port = 443
+            httpd = BaseHTTPServer.HTTPServer((options.address, int(options.port)), RequestHandler)
+            httpd.socket = ssl.wrap_socket (httpd.socket, certfile=options.certfile, server_side=True)
+            httpd.serve_forever()
+    else:
+            httpd = HTTPServer((options.address, options.port), RequestHandler)
+            httpd.serve_forever()
 
 if __name__ == "__main__":
     main()
