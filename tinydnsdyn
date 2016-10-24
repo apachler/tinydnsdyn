@@ -3,7 +3,7 @@
 # Copyright 2011 Felix Hanley <felix@seconddrawer.com.au>
 #
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License version 2, as 
+# it under the terms of the GNU General Public License version 2, as
 # published by the Free Software Foundation.
 #
 # This program is distributed in the hope that it will be useful,
@@ -15,18 +15,26 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301  USA
+#
+# 2016.10.03  OE8APR   Added SSL support
+# 2016.10.06  OE8APR   Added MySQL user check against Dolphin profiles (used for www.socialhams.net)
+#
 
 import sys
 import os
 import base64
 import crypt
 import urlparse
-import SimpleHTTPServer
+import BaseHTTPServer, SimpleHTTPServer
+import ssl
 import SocketServer
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 import threading
 from optparse import OptionParser
+import MySQLdb as mdb
+import hashlib
+import datetime
 
 class RequestHandler(BaseHTTPRequestHandler):
     """handle requests to BaseHTTPServer"""
@@ -102,6 +110,11 @@ class Authorizer:
             self.entries.append(entry)
 
     def check(self, username, password, fqdn=None):
+        # first check if user is defined in the database
+        self.dolphin = Dolphin()
+        if self.dolphin.check(username, password):
+            return True
+
         for entry in self.entries:
             if entry[0] == username:
                 if entry[1] == crypt.crypt(password, entry[1]):
@@ -117,7 +130,7 @@ class DataFile:
     def __init__(self):
         self.changed = False
         self.lines = []
-        self.datafile_path = os.path.join(options.root, options.data)
+        self.datafile_path = os.path.join(options.datafile)
         self.tmpfile_path = os.path.join(options.root, "data.tinydnsdyn.tmp")
         self.datafile = open(self.datafile_path,"r")
         self.tmpfile = open(self.tmpfile_path,"w")
@@ -142,7 +155,7 @@ class DataFile:
                         tail += ':' + fields[3]
 
                     if fields[1] != address:
-                        line = "%s:%s:%s\n" % (fields[0],address,tail)
+                        line = "%s:%s:%s" % (fields[0],address,tail)
                         result = 1
                         self.changed = True
                     else:
@@ -163,36 +176,88 @@ class DataFile:
     def __del__(self):
         try: os.remove(self.tmpfile_path)
         except: pass
-    
+
+class Dolphin:
+    """check if user is allowed to update dns entries"""
+
+    def __init__(self):
+        self.host = options.mysql_host
+        self.db = options.mysql_db
+        self.user = options.mysql_user
+        self.password = options.mysql_password
+        self.level = options.dolphin_level
+
+    def check(self, user, password):
+        con = mdb.connect(self.host, self.user, self.password, self.db)
+
+        with con:
+            user = con.escape_string(user)
+            password = con.escape_string(password)
+
+            cur = con.cursor()
+
+            # get salt from DB
+            cur.execute("SELECT `Salt` FROM `Profiles` WHERE `NickName` = '" + user + "'")
+            row = cur.fetchone()
+            salt = str(row[0])
+            print "Salt is " + str(salt)
+
+            # generate password hash and check if it equals users password in DB
+            passwordmd5 = hashlib.md5(password).hexdigest()
+            passwordsha1 = hashlib.sha1(passwordmd5+salt).hexdigest()
+            print "Password sha is " + passwordsha1
+
+            now = datetime.datetime.now()
+            f = '%Y-%m-%d %H:%M:%S'
+            cur.execute("SELECT `ID` FROM `Profiles` as p, `sys_acl_levels_members` as l WHERE p.`NickName` = '" + user + "' AND p.`Password` = '" + passwordsha1 + "' AND p.`ID` = l.`IDMember` AND l.`IDLevel` >= " + str(self.level) + " AND (l.`DateExpires` > '" + now.strftime(f) + "' OR l.`DateExpires` IS NULL)")
+            id = cur.fetchone()
+
+            if id is not None:
+                print "ID is " + str(id[0])
+                return True
+
+            return False
 
 def main():
-
     usage = "usage: %prog [options]"
     parser = OptionParser(usage=usage)
     parser.add_option("-r", "--root", dest="root",
-            help="absolute path to the tinydns data directory")
-    parser.add_option("-d", "--data", dest="data",
-            help="data file to update, relative to root (default: tinydnsdyn.data)")
+            help="absolute path to the tinydns data directory (default: /var/cache/tinydns)")
+    parser.add_option("-d", "--datafile", dest="datafile",
+            help="absolute path to the data file to update (default: /etc/tinydns/ddns.socialhams.net)")
     parser.add_option("-t", "--ttl", dest="ttl",
-            help="default TTL (default: 3600)")
+            help="default TTL (default: 60)")
     parser.add_option("-a", "--address", dest="address",
             help="the address to bind to (default: all)")
-    parser.add_option("-p", "--port", dest="port",
-            help="the port to listen on (default: 5353)")
+    parser.add_option("-l", "--listen", dest="port",
+            help="the port to listen on (default: 4443)")
     parser.add_option("-f", "--passfile", dest="passfile",
-            help="the password file (default: htpasswd)")
+            help="the password file (default: /home/tinydns/tinydnsdyn.passwords)")
+    parser.add_option("-c", "--certfile", dest="passfile",
+            help="the ssl cert file (default: /home/tinydns/tinydnsdyn.cert)")
+    parser.add_option("-m", "--mysql_host", dest="mysql_host",
+            help="ip or hostname of mysql server (default: localhost)")
+    parser.add_option("-b", "--mysql_db", dest="mysql_db",
+            help="name of mysql database")
+    parser.add_option("-u", "--mysql_user", dest="mysql_user",
+            help="username for accessing database")
+    parser.add_option("-p", "--mysql_password", dest="mysql_password",
+            help="password for accessing database")
+    parser.add_option("-e", "--dolphin_level", dest="dolphin_level",
+            help="Dolphin user level needed (default: 7)")
 
     # defaults
-    parser.set_defaults(root="/var/services/tinydns/root", address='',
-            data="tinydnsdyn.data", port=5353, ttl=3600,
-            passfile='/var/services/tinydns/htpasswd')
+    parser.set_defaults(root='/var/cache/tinydns', address='',
+            datafile='/etc/tinydns/ddns.socialhams.net', port=4443, ttl=60,
+            passfile='/home/tinydns/tinydnsdyn.passwords',
+            certfile='/home/tinydns/tinydnsdyn.cert',
+            mysql_host='localhost', dolphin_level=7)
     global options
     (options, args) = parser.parse_args()
 
-
-    httpd = HTTPServer((options.address, options.port), RequestHandler)
+    httpd = BaseHTTPServer.HTTPServer((options.address, options.port), RequestHandler)
+    httpd.socket = ssl.wrap_socket (httpd.socket, certfile=options.certfile, server_side=True)
     httpd.serve_forever()
-
 
 if __name__ == "__main__":
     main()
