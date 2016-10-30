@@ -249,7 +249,7 @@ def main():
             help="Dolphin user level needed (default: 7)")
 
     # defaults
-    parser.set_defaults(root='/var/cache/tinydns', address='', ssl='yes',
+    parser.set_defaults(root='/var/cache/tinydns', address='', ssl='no',
             datafile='/etc/tinydns/ddns.socialhams.net', port=80, ttl=60,
             passfile='/home/tinydns/tinydnsdyn.passwords',
             certfile='/home/tinydns/tinydnsdyn.cert',
@@ -264,7 +264,7 @@ def main():
             httpd.socket = ssl.wrap_socket (httpd.socket, certfile=options.certfile, server_side=True)
             httpd.serve_forever()
     else:
-            httpd = HTTPServer((options.address, options.port), RequestHandler)
+            httpd = HTTPServer((options.address, int(options.port)), RequestHandler)
             httpd.serve_forever()
 
 if __name__ == "__main__":
