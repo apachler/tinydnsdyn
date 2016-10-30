@@ -188,33 +188,34 @@ class Dolphin:
         self.level = options.dolphin_level
 
     def check(self, user, password):
-        con = mdb.connect(self.host, self.user, self.password, self.db)
+        if self.db is not None:
+            con = mdb.connect(self.host, self.user, self.password, self.db)
 
-        with con:
-            user = con.escape_string(user)
-            password = con.escape_string(password)
+            with con:
+                user = con.escape_string(user)
+                password = con.escape_string(password)
 
-            cur = con.cursor()
+                cur = con.cursor()
 
-            # get salt from DB
-            cur.execute("SELECT `Salt` FROM `Profiles` WHERE `NickName` = '" + user + "'")
-            row = cur.fetchone()
-            salt = str(row[0])
-            # DEBUG print "Salt is " + str(salt)
+                # get salt from DB
+                cur.execute("SELECT `Salt` FROM `Profiles` WHERE `NickName` = '" + user + "'")
+                row = cur.fetchone()
+                salt = str(row[0])
+                # DEBUG print "Salt is " + str(salt)
 
-            # generate password hash and check if it equals users password in DB
-            passwordmd5 = hashlib.md5(password).hexdigest()
-            passwordsha1 = hashlib.sha1(passwordmd5+salt).hexdigest()
-            # DEBUG print "Password sha is " + passwordsha1
+                # generate password hash and check if it equals users password in DB
+                passwordmd5 = hashlib.md5(password).hexdigest()
+                passwordsha1 = hashlib.sha1(passwordmd5+salt).hexdigest()
+                # DEBUG print "Password sha is " + passwordsha1
 
-            now = datetime.datetime.now()
-            f = '%Y-%m-%d %H:%M:%S'
-            cur.execute("SELECT `ID` FROM `Profiles` as p, `sys_acl_levels_members` as l WHERE p.`NickName` = '" + user + "' AND p.`Password` = '" + passwordsha1 + "' AND p.`ID` = l.`IDMember` AND l.`IDLevel` >= " + str(self.level) + " AND (l.`DateExpires` > '" + now.strftime(f) + "' OR l.`DateExpires` IS NULL)")
-            id = cur.fetchone()
+                now = datetime.datetime.now()
+                f = '%Y-%m-%d %H:%M:%S'
+                cur.execute("SELECT `ID` FROM `Profiles` as p, `sys_acl_levels_members` as l WHERE p.`NickName` = '" + user + "' AND p.`Password` = '" + passwordsha1 + "' AND p.`ID` = l.`IDMember` AND l.`IDLevel` >= " + str(self.level) + " AND (l.`DateExpires` > '" + now.strftime(f) + "' OR l.`DateExpires` IS NULL)")
+                id = cur.fetchone()
 
-            if id is not None:
-                print "User found with UserID " + str(id[0]) + " in Dolphin database"
-                return True
+                if id is not None:
+                    print "User found with UserID " + str(id[0]) + " in Dolphin database"
+                    return True
 
             return False
 
