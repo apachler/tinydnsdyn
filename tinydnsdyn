@@ -18,6 +18,7 @@
 #
 # 2016.10.03  OE8APR   Added SSL support
 # 2016.10.06  OE8APR   Added MySQL user check against Dolphin profiles (used for www.socialhams.net)
+# 2016.11.02  OE8APR   Added support for multiple doamins
 #
 
 import sys
@@ -79,6 +80,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     for hostname in hosts:
                         if self.auth.check(username, password, hostname):
                             # make the changes to the file
+                            self.datafile.usedomain(hostname)
                             result = self.datafile.update(address, hostname)
                             if result == 1:
                                 response = 'good'
@@ -110,15 +112,21 @@ class Authorizer:
             self.entries.append(entry)
 
     def check(self, username, password, fqdn=None):
-        # first check if user is defined in the database
+        self.accessgranted = False
+        if fqdn is not None:
+            self.domain = fqdn.split('.', 1)[-1]
+        else:
+            self.domain = None
+
+        # first check if user can gain access through the database
         self.dolphin = Dolphin()
         if self.dolphin.check(username, password):
-            return True
+            self.accessgranted = True
 
         for entry in self.entries:
             if entry[0] == username:
-                if entry[1] == crypt.crypt(password, entry[1]):
-                    if fqdn == None or len(entry) == 2 or fqdn in entry[2].split(','):
+                if entry[1] == crypt.crypt(password, entry[1]) or self.accessgranted:
+                    if fqdn == None or fqdn in entry[2].split(',') or self.domain in entry[2].split(','):
                         return True
 
         return False
@@ -130,10 +138,13 @@ class DataFile:
     def __init__(self):
         self.changed = False
         self.lines = []
-        self.datafile_path = os.path.join(options.datafile)
         self.tmpfile_path = os.path.join(options.root, "data.tinydnsdyn.tmp")
-        self.datafile = open(self.datafile_path,"r")
         self.tmpfile = open(self.tmpfile_path,"w")
+
+    def usedomain(self, hostname):
+        self.domain = hostname.split('.', 1)[-1]
+        self.datafile_path = os.path.join(options.datadir + "/" + self.domain)
+        self.datafile = open(self.datafile_path,"r")
 
     def update(self, address, hostname):
         """update the temporary data file"""
@@ -200,13 +211,16 @@ class Dolphin:
                 # get salt from DB
                 cur.execute("SELECT `Salt` FROM `Profiles` WHERE `NickName` = '" + user + "'")
                 row = cur.fetchone()
+                if row is None:
+                    return False
+
                 salt = str(row[0])
-                # DEBUG print "Salt is " + str(salt)
+                #DEBUG print "Salt is " + str(salt)
 
                 # generate password hash and check if it equals users password in DB
                 passwordmd5 = hashlib.md5(password).hexdigest()
                 passwordsha1 = hashlib.sha1(passwordmd5+salt).hexdigest()
-                # DEBUG print "Password sha is " + passwordsha1
+                #DEBUG print "Password sha is " + passwordsha1
 
                 now = datetime.datetime.now()
                 f = '%Y-%m-%d %H:%M:%S'
@@ -224,8 +238,8 @@ def main():
     parser = OptionParser(usage=usage)
     parser.add_option("-r", "--root", dest="root",
             help="absolute path to the tinydns data directory (default: /var/cache/tinydns)")
-    parser.add_option("-d", "--datafile", dest="datafile",
-            help="absolute path to the data file to update (default: /etc/tinydns/ddns.socialhams.net)")
+    parser.add_option("-d", "--datadir", dest="datadir",
+            help="absolute path to the data files directory (default: /etc/tinydns)")
     parser.add_option("-t", "--ttl", dest="ttl",
             help="default TTL (default: 60)")
     parser.add_option("-a", "--address", dest="address",
@@ -251,7 +265,7 @@ def main():
 
     # defaults
     parser.set_defaults(root='/var/cache/tinydns', address='', ssl='no',
-            datafile='/etc/tinydns/ddns.socialhams.net', port=80, ttl=60,
+            datadir='/etc/tinydns', port=80, ttl=60,
             passfile='/home/tinydns/tinydnsdyn.passwords',
             certfile='/home/tinydns/tinydnsdyn.cert',
             mysql_host='localhost', dolphin_level=7)

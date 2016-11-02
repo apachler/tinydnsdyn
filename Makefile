@@ -1,0 +1,2 @@
+all:
+	service tinydns reload
