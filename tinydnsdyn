@@ -26,16 +26,20 @@ import os
 import base64
 import crypt
 import urlparse
-import BaseHTTPServer, SimpleHTTPServer
+
 import ssl
-import SocketServer
-from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from SocketServer import ThreadingMixIn
 import threading
+
 from optparse import OptionParser
+
 import MySQLdb as mdb
 import hashlib
 import datetime
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in a separate thread."""
 
 class RequestHandler(BaseHTTPRequestHandler):
     """handle requests to BaseHTTPServer"""
@@ -275,12 +279,13 @@ def main():
     if options.ssl == 'yes':
             if options.port == 80:
                     options.port = 443
-            httpd = BaseHTTPServer.HTTPServer((options.address, int(options.port)), RequestHandler)
-            httpd.socket = ssl.wrap_socket (httpd.socket, certfile=options.certfile, server_side=True)
-            httpd.serve_forever()
+            httpd = ThreadedHTTPServer((options.address, int(options.port)), RequestHandler)
+            httpd.socket = ssl.wrap_socket(httpd.socket, certfile=options.certfile, server_side=True)
     else:
-            httpd = HTTPServer((options.address, int(options.port)), RequestHandler)
-            httpd.serve_forever()
+            httpd = ThreadedHTTPServer((options.address, int(options.port)), RequestHandler)
+
+    print 'Starting server, use <Ctrl-C> to stop'
+    httpd.serve_forever()
 
 if __name__ == "__main__":
     main()
